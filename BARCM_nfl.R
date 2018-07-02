@@ -5,65 +5,50 @@ source("./truncated-normal.R")
 
 covariates<-as.matrix(read.table("data-read/QB_cov.txt"))
 EBranking<-read.table("data-read/QB_EBF.txt",sep="\t")
-ranking<-as.matrix(EBranking[,-c(1,9)])
+ranking<-as.matrix(EBranking[,-1])
 
-#beta independent+equal known variance.
+##########################
 
-library("MCMCpack")
+MCMC = 50000 #number of samples
+burn = 1000
 
-MCMC=5000 #number of samples
-M=dim(ranking)[2] #number of rankers
-N=dim(ranking)[1] #number of entities in each group
-G=1 #number of groups
-K=dim(covariates)[2] #number of covariate
+############### data read ###############
+M = dim(ranking)[2] #number of rankers
+N = dim(ranking)[1] #number of entities in each group
+nGroup = 1 #number of groups
+nEach = dim(ranking)[1] # number of entities in each group
+p = dim(covariates)[2] #number of covariate
 
-order<-array(dim=c(M,G,N)) #largest one rank first
-showorder<-array(dim=c(M,G,N)) #indicator of the i-th item
-X<-array(dim=c(G,N,K)) #covariate matrix
-Y<-array(dim=c(M,G,N,MCMC)) #latent value of Y*
-#gamma<-array(dim=c(G,N,MCMC)) #the part that doctors agree
-alpha<-array(dim=c(G,N,MCMC)) #the part that doctors agree
-Beta<-array(dim=c(K,MCMC)) 
-weight<-array(dim=c(M,MCMC))
+X = array(dim=c(N,p)) #covariate matrix
+Y = array(dim=c(M,N,MCMC)) #latent value of Y*
 
-lambda=5
-s0=1
-
-#read covariates in different groups
-
-for(i in 1:dim(covariates)[2]){
-  covariates[,i] = (covariates[,i] - mean(covariates[,i]))/sd(covariates[,i])
+# read covariates
+X = covariates[1:N,]
+for(i in 1:dim(X)[2]){
+  X[,i] = (X[,i] - mean(X[,i]))/sd(X[,i])
 }
 
-X[1,,]=covariates
+# subgroups of entities for all ranker (could be different for different rankers)
+subgroups = list()
+for(i in 1:nGroup){
+  subgroups[[i]] = nEach*(i-1)+1:nEach
+}
 
-Y[,1,,1]=25-t(ranking)
-
-#find out the order and set initial value of Y*
+ranked_entities = list() # decreasingly ranked entities
 for(i in 1:M){
-	for(g in 1:G){
-		for(j in 1:N){
-			count=0
-			for(k in 1:N){
-				if(Y[i,g,k,1]>=Y[i,g,j,1]) count=count+1
-			}
-		order[i,g,j]=count
-		}
-	}
+  ranked_entities[[i]] = list()
 }
 
-#find out indicator of different order
-for(i in 1:M){
-	for(j in 1:G){
-		for(k in 1:N){
-			for(m in 1:N){
-				if(order[i,j,m]==k){
-					showorder[i,j,k]=m
-				}
-			}
-		}
-	}
+# find out ranked entities
+for (j in 1:nGroup){
+  for (i in 1:M){
+    ranked_entities[[i]][[j]] = ranking[,i] + (j-1)*nEach
+    for (k in subgroups[[j]]){
+      Y[i,k,1] = nEach+1-which(ranking[,i]==k) # set initial value of Y*
+    }
+  }
 }
+
 
 #========================BARCM=======================
 source("./BARCM.R")

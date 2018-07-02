@@ -5,7 +5,7 @@ source("./truncated-normal.R")
 
 covariates<-as.matrix(read.table("data-read/QB_cov.txt"))
 EBranking<-read.table("data-read/QB_EBF.txt",sep="\t")
-ranking<-as.matrix(EBranking[,-c(1,9)])
+ranking<-as.matrix(EBranking[,-1])
 
 #beta independent+equal known variance.
 
