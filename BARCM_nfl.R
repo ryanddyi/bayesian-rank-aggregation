@@ -1,59 +1,69 @@
-# orthodontics data - rank aggregation mixture model
-
 #setwd('/Users/ydd/Documents/BARC/code')
 source("./truncated-normal.R")
-source("./BARCM.R")
-covariates = as.matrix(read.csv("data-read/covariates.csv"))
 
-##### combine covariates
-#covariates0 = covariates
-#covariates1 = array(dim = c(dim(covariates0)[1],5))
-#covariates1[,1] = rowSums(covariates0[,1:6])
-#covariates1[,2] = rowSums(covariates0[,7:8])
-#covariates1[,3:5] = rowSums(covariates0[,9:11])
-#colnames(covariates1) = c('dmm','bom', 'ojm','obm','clm')
-#covariates = covariates1
-##########################
+#nfl data
 
-MCMC = 50000 #number of samples
-burn = 1000
+covariates<-as.matrix(read.table("data-read/QB_cov.txt"))
+EBranking<-read.table("data-read/QB_EBF.txt",sep="\t")
+ranking<-as.matrix(EBranking[,-c(1,9)])
 
-############### data read ###############
-M = 69 #number of rankers
-N = 108 #number of entities
-p=dim(covariates)[2] #number of covariate
-nGroup = 9 # number of gruops
-nEach = 12 # number of entities in each group
+#beta independent+equal known variance.
 
-X = array(dim=c(N,p)) #covariate matrix
-Y = array(dim=c(M,N,MCMC)) #latent value of Y*
+library("MCMCpack")
 
-# read covariates
-X = covariates[1:N,]
-for(i in 1:dim(X)[2]){
-  X[,i] = (X[,i] - mean(X[,i]))/sd(X[,i])
+MCMC=5000 #number of samples
+M=dim(ranking)[2] #number of rankers
+N=dim(ranking)[1] #number of entities in each group
+G=1 #number of groups
+K=dim(covariates)[2] #number of covariate
+
+order<-array(dim=c(M,G,N)) #largest one rank first
+showorder<-array(dim=c(M,G,N)) #indicator of the i-th item
+X<-array(dim=c(G,N,K)) #covariate matrix
+Y<-array(dim=c(M,G,N,MCMC)) #latent value of Y*
+#gamma<-array(dim=c(G,N,MCMC)) #the part that doctors agree
+alpha<-array(dim=c(G,N,MCMC)) #the part that doctors agree
+Beta<-array(dim=c(K,MCMC)) 
+weight<-array(dim=c(M,MCMC))
+
+lambda=5
+s0=1
+
+#read covariates in different groups
+
+for(i in 1:dim(covariates)[2]){
+  covariates[,i] = (covariates[,i] - mean(covariates[,i]))/sd(covariates[,i])
 }
 
-# subgroups of entities for all ranker (could be different for different rankers)
-subgroups = list()
-for(i in 1:nGroup){
-  subgroups[[i]] = nEach*(i-1)+1:nEach
-}
+X[1,,]=covariates
 
-ranked_entities = list() # decreasingly ranked entities
+Y[,1,,1]=25-t(ranking)
+
+#find out the order and set initial value of Y*
 for(i in 1:M){
-  ranked_entities[[i]] = list()
+	for(g in 1:G){
+		for(j in 1:N){
+			count=0
+			for(k in 1:N){
+				if(Y[i,g,k,1]>=Y[i,g,j,1]) count=count+1
+			}
+		order[i,g,j]=count
+		}
+	}
 }
 
-# find out ranked entities
-for (j in 1:nGroup){
-  rank_subgroup = t(as.matrix(read.table(paste0("data-read/g",j,".txt"),sep="\t",header=T)[,-1]))
-  Y[,subgroups[[j]],1] = nEach+1-rank_subgroup # set initial value of Y*
-  for(i in 1:M){
-    ranked_entities[[i]][[j]] = order(rank_subgroup[i,]) + (j-1)*nEach
-  }
+#find out indicator of different order
+for(i in 1:M){
+	for(j in 1:G){
+		for(k in 1:N){
+			for(m in 1:N){
+				if(order[i,j,m]==k){
+					showorder[i,j,k]=m
+				}
+			}
+		}
+	}
 }
-
 
 #========================BARCM=======================
 source("./BARCM.R")
@@ -195,71 +205,3 @@ p
 pdf('corrplot_mu.pdf', height = 5, width = 6)
 print(p)
 dev.off()
-
-
-##################
-
-Y_agg_all = rowMeans(Y_agg)
-Y_agg_other = rowMeans(Y_agg[,re_order[35:69]])
-
-entityname=c(paste0("A",1:12),paste0("B",1:12),paste0("C",1:12),paste0("D",1:12), paste0("E",1:12),
-             paste0("F",1:12),paste0("G",1:12),paste0("H",1:12),paste0("I",1:12))
-#result=cbind(Y_agg_w, Y_agg_all, mu_cat[,pi_order[1:3]])
-result=cbind(Y_agg_all, mu_cat[,pi_order[1:3]], Y_agg_other)
-#(1-cor(Y_agg_w, Y_agg_all, method = 'kendall'))/2 # kendall tau distance between BARCM and BARCW.
-
-top_five = array(dim=c(5,5))
-for(i in 1:dim(top_five)[2]){
-  top_five[,i] = entityname[order(result[,i],decreasing=T)[1:5]]
-}
-top_five
-
-bot_five = array(dim=c(5,5))
-for(i in 1:dim(bot_five)[2]){
-  bot_five[,i] = entityname[order(result[,i])[1:5]]
-}
-bot_five
-
-xtable(bot_five)
-
-########################
-
-# clustering plots
-library("cluster")
-library("factoextra")
-library("magrittr")
-
-pdf('distplot_mu.pdf', height = 8, width = 9)
-res.dist <- get_dist(t(Y_agg), stand = TRUE, method = "kendall")/2
-#res.dist <- get_dist(Y_est, stand = TRUE, method = "kendall")
-#fviz_dist(res.dist, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
-fviz_dist(res.dist, gradient = list(low = "#FC4E07", high = "white"))
-dev.off()
-
-# diagnositc plots
-library('coda')
-library('mcmcplots')
-
-for(j in 1:3){
-  chain = as.mcmc(mu[1,j,])
-  pdf(paste0('orth_densityplot',j,'.pdf'), height = 5, width = 5)
-  densplot(chain)
-  dev.off()
-  pdf(paste0('orth_acfplot',j,'.pdf'), height = 5, width = 5)
-  acf(chain, main="", 2000)
-  dev.off()
-  pdf(paste0('orth_traceplot',j,'.pdf'), height = 5, width = 5)
-  traceplot(chain)
-  dev.off()
-}
-
-
-#effectiveSize(mu[1,3,1:10000])
-
-#eff_size = array(dim = dim(mu[,,1]))
-#for (i in 1:108){
-#  for(j in 1:69){
-#    eff_size[i,j] = effectiveSize(mu[i,j,1:10000])
-#  }
-#}
-
